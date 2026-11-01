@@ -111,6 +111,16 @@ BLOCKED  USD 400.00 -> Totally Legit Deals
 - **Transaction audit history:** every approve and block decision is recorded.
 - **Receipt and payment evidence verification** *(planned)*
 
+- ### Human-in-the-Loop Payment Approval
+
+- Requires explicit user permission before an AI agent completes a purchase when approval is required by the mandate.
+- Displays purchase details, including product, merchant, amount, and currency.
+- Provides Approve and Reject options.
+- Prevents payment capture without valid authorization.
+- Revalidates the purchase details before payment capture.
+- Records user decisions in the Intent & Evidence Ledger.
+- Supports automatic approval for purchases that meet user-defined pre-approval rules.
+
 ## Threat Model
 
 MANDATE does not try to stop an agent from being fooled. It makes sure a fooled agent cannot spend outside what you approved.
