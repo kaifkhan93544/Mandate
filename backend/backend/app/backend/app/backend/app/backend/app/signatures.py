@@ -5,24 +5,22 @@ import json
 from .config import SIGNING_SECRET
 
 
-def create_signature(data: dict) -> str:
-    message = json.dumps(
+def sign_mandate(data: dict) -> str:
+    payload = json.dumps(
         data,
         sort_keys=True,
         separators=(",", ":")
-    ).encode("utf-8")
+    ).encode()
 
     return hmac.new(
         SIGNING_SECRET,
-        message,
+        payload,
         hashlib.sha256
     ).hexdigest()
 
 
-def verify_signature(data: dict, signature: str) -> bool:
-    expected_signature = create_signature(data)
-
+def verify_mandate(data: dict, signature: str) -> bool:
     return hmac.compare_digest(
-        expected_signature,
+        sign_mandate(data),
         signature
     )
