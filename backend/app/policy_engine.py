@@ -1,14 +1,18 @@
+
 from datetime import datetime, timezone
 
 
 def evaluate_payment(mandate: dict, payment: dict) -> tuple[bool, str]:
     """
     Check whether a payment follows the mandate rules.
-    Returns (approved, reason).
+    Amounts are stored and compared in paise.
     """
 
-    if payment["amount"] > mandate["max_amount"]:
+    if payment["amount_minor"] > mandate["max_amount_minor"]:
         return False, "Payment exceeds the maximum allowed amount."
+
+    if payment["amount_minor"] <= 0:
+        return False, "Payment amount must be greater than zero."
 
     if payment["currency"].upper() != mandate["currency"].upper():
         return False, "Payment currency does not match the mandate."
