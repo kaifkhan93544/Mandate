@@ -1,11 +1,13 @@
+
 import json
 import uuid
+from decimal import Decimal, ROUND_HALF_UP
 from datetime import datetime, timezone
 
 from fastapi import FastAPI, HTTPException
 
 from .schemas import MandateCreate, PaymentCheck
-from .database import get_connection, initialize_database
+from .database import db_session, initialize_database
 from .signatures import create_signature, verify_signature
 from .policy_engine import evaluate_payment
 
@@ -13,8 +15,22 @@ from .policy_engine import evaluate_payment
 app = FastAPI(
     title="MANDATE API",
     description="AI Payment Security and Authorization Platform",
-    version="1.0.0"
+    version="1.1.0"
 )
+
+
+def to_minor_units(amount: float) -> int:
+    """Convert rupees into paise safely."""
+    return int(
+        (Decimal(str(amount)) * 100).quantize(
+            Decimal("1"), rounding=ROUND_HALF_UP
+        )
+    )
+
+
+def to_major_units(amount_minor: int) -> float:
+    """Convert paise into rupees for API responses."""
+    return float(Decimal(amount_minor) / 100)
 
 
 @app.on_event("startup")
@@ -30,31 +46,31 @@ def home():
     }
 
 
-# 1. CREATE A PAYMENT MANDATE
-
 @app.post("/mandates")
 def create_mandate(request: MandateCreate):
-
     mandate_id = str(uuid.uuid4())
+    max_amount_minor = to_minor_units(request.max_amount)
+
+    if max_amount_minor <= 0:
+        raise HTTPException(status_code=422, detail="Amount is too small.")
 
     mandate_data = {
         "purpose": request.purpose,
-        "max_amount": request.max_amount,
-        "currency": request.currency,
+        "max_amount_minor": max_amount_minor,
+        "currency": request.currency.upper(),
         "allowed_merchants": request.allowed_merchants,
         "expires_at": request.expires_at,
         "require_approval": request.require_approval
     }
 
     signature = create_signature(mandate_data)
-
     created_at = datetime.now(timezone.utc).isoformat()
 
-    with get_connection() as conn:
+    with db_session() as conn:
         conn.execute(
             """
             INSERT INTO mandates (
-                id, purpose, max_amount, currency,
+                id, purpose, max_amount_minor, currency,
                 allowed_merchants, expires_at,
                 require_approval, signature, created_at
             )
@@ -63,8 +79,8 @@ def create_mandate(request: MandateCreate):
             (
                 mandate_id,
                 request.purpose,
-                request.max_amount,
-                request.currency,
+                max_amount_minor,
+                request.currency.upper(),
                 json.dumps(request.allowed_merchants),
                 request.expires_at,
                 int(request.require_approval),
@@ -77,16 +93,16 @@ def create_mandate(request: MandateCreate):
         "message": "Mandate created successfully",
         "mandate_id": mandate_id,
         "signature": signature,
-        "mandate": mandate_data
+        "mandate": {
+            **mandate_data,
+            "max_amount": to_major_units(max_amount_minor)
+        }
     }
 
 
-# 2. GET ALL MANDATES
-
 @app.get("/mandates")
 def get_mandates():
-
-    with get_connection() as conn:
+    with db_session() as conn:
         rows = conn.execute(
             "SELECT * FROM mandates ORDER BY created_at DESC"
         ).fetchall()
@@ -97,7 +113,7 @@ def get_mandates():
         mandates.append({
             "id": row["id"],
             "purpose": row["purpose"],
-            "max_amount": row["max_amount"],
+            "max_amount": to_major_units(row["max_amount_minor"]),
             "currency": row["currency"],
             "allowed_merchants": json.loads(row["allowed_merchants"]),
             "expires_at": row["expires_at"],
@@ -108,67 +124,65 @@ def get_mandates():
     return {"mandates": mandates}
 
 
-# 3. CHECK A PAYMENT
-
 @app.post("/payments/check")
 def check_payment(request: PaymentCheck):
-
-    with get_connection() as conn:
+    with db_session() as conn:
         row = conn.execute(
             "SELECT * FROM mandates WHERE id = ?",
             (request.mandate_id,)
         ).fetchone()
 
-    if row is None:
-        raise HTTPException(
-            status_code=404,
-            detail="Mandate not found"
-        )
+        if row is None:
+            raise HTTPException(
+                status_code=404,
+                detail="Mandate not found"
+            )
 
-    mandate_data = {
-        "purpose": row["purpose"],
-        "max_amount": float(row["max_amount"]),
-        "currency": row["currency"],
-        "allowed_merchants": json.loads(row["allowed_merchants"]),
-        "expires_at": row["expires_at"],
-        "require_approval": bool(row["require_approval"])
-    }
+        mandate_data = {
+            "purpose": row["purpose"],
+            "max_amount_minor": row["max_amount_minor"],
+            "currency": row["currency"],
+            "allowed_merchants": json.loads(row["allowed_merchants"]),
+            "expires_at": row["expires_at"],
+            "require_approval": bool(row["require_approval"])
+        }
 
-    payment_data = {
-        "amount": request.amount,
-        "currency": request.currency,
-        "merchant": request.merchant
-    }
-
-    # Verify the mandate signature before trusting its rules.
-
-    signature_valid = verify_signature(
-        mandate_data,
-        row["signature"]
-    )
-
-    if signature_valid:
-        approved, reason = evaluate_payment(
+        signature_valid = verify_signature(
             mandate_data,
-            payment_data
+            row["signature"]
         )
-    else:
-        approved = False
-        reason = "Mandate signature verification failed."
 
-    decision = "APPROVED" if approved else "BLOCKED"
+        amount_minor = to_minor_units(request.amount)
 
-    decision_id = str(uuid.uuid4())
+        payment_data = {
+            "amount_minor": amount_minor,
+            "currency": request.currency.upper(),
+            "merchant": request.merchant
+        }
 
-    created_at = datetime.now(timezone.utc).isoformat()
+        if signature_valid:
+            approved, reason = evaluate_payment(
+                mandate_data,
+                payment_data
+            )
+        else:
+            approved = False
+            reason = "Mandate signature verification failed."
 
-    # Save the decision in the transaction ledger.
+        if approved:
+            decision = "allow"
+        elif "requires user approval" in reason.lower():
+            decision = "needs_approval"
+        else:
+            decision = "deny"
 
-    with get_connection() as conn:
+        decision_id = str(uuid.uuid4())
+        created_at = datetime.now(timezone.utc).isoformat()
+
         conn.execute(
             """
             INSERT INTO decisions (
-                id, mandate_id, amount, currency,
+                id, mandate_id, amount_minor, currency,
                 merchant, decision, reason, created_at
             )
             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
@@ -176,8 +190,8 @@ def check_payment(request: PaymentCheck):
             (
                 decision_id,
                 request.mandate_id,
-                request.amount,
-                request.currency,
+                amount_minor,
+                request.currency.upper(),
                 request.merchant,
                 decision,
                 reason,
@@ -188,17 +202,18 @@ def check_payment(request: PaymentCheck):
     return {
         "decision_id": decision_id,
         "mandate_id": request.mandate_id,
-        "decision": decision,
+        "decision": {
+            "allow": "APPROVED",
+            "deny": "BLOCKED",
+            "needs_approval": "NEEDS_APPROVAL"
+        }[decision],
         "reason": reason
     }
 
 
-# 4. GET TRANSACTION HISTORY
-
 @app.get("/transactions")
 def get_transactions():
-
-    with get_connection() as conn:
+    with db_session() as conn:
         rows = conn.execute(
             "SELECT * FROM decisions ORDER BY created_at DESC"
         ).fetchall()
@@ -209,10 +224,14 @@ def get_transactions():
         transactions.append({
             "id": row["id"],
             "mandate_id": row["mandate_id"],
-            "amount": row["amount"],
+            "amount": to_major_units(row["amount_minor"]),
             "currency": row["currency"],
             "merchant": row["merchant"],
-            "decision": row["decision"],
+            "decision": {
+                "allow": "APPROVED",
+                "deny": "BLOCKED",
+                "needs_approval": "NEEDS_APPROVAL"
+            }[row["decision"]],
             "reason": row["reason"],
             "created_at": row["created_at"]
         })
