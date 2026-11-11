@@ -41,8 +41,22 @@ export function canonicalJson(value: unknown): string {
   return `{${entries.join(',')}}`;
 }
 
+export function formatMinorAmount(totalMinor: number, currency: string): string {
+  return `${(totalMinor / 100).toFixed(2)} ${currency}`;
+}
+
+export function hasUnscaledMinorLeak(summary: string, facts: IntentReceiptFacts): boolean {
+  const formattedMajor = (facts.totalMinor / 100).toFixed(2);
+  if (summary.includes(formattedMajor)) {
+    return false;
+  }
+  const currencyPattern = new RegExp(`\\b${facts.totalMinor}\\s*${facts.currency}\\b`, 'i');
+  const symbolPattern = new RegExp(`\\$${facts.totalMinor}(?!\\d)`);
+  return currencyPattern.test(summary) || symbolPattern.test(summary);
+}
+
 export function buildDeterministicNarrative(facts: IntentReceiptFacts): string {
-  const formattedAmount = `${(facts.totalMinor / 100).toFixed(2)} ${facts.currency}`;
+  const formattedAmount = formatMinorAmount(facts.totalMinor, facts.currency);
   if (facts.decision === 'allow') {
     return (
       `Approved ${formattedAmount} at ${facts.merchantId} (PayPal order ${facts.paypalOrderId}) ` +
@@ -82,15 +96,19 @@ export async function generateIntentReceipt(options: {
   let narrativeSource: IntentReceipt['narrativeSource'] = 'deterministic-template';
 
   if (options.useLlmNarrative) {
+    const displayAmount = formatMinorAmount(facts.totalMinor, facts.currency);
     const llmRes = await generateStructured({
-      systemPrompt:
-        'Summarize this verified payment enforcement outcome in 1-2 factual sentences as JSON {"summary":"..."}. Do not invent numbers or alter facts.',
-      userPrompt: JSON.stringify(facts),
+      systemPrompt: [
+        'Summarize this verified payment enforcement outcome in 1-2 factual sentences as JSON {"summary":"..."}.',
+        'CRITICAL: Report the money amount ONLY using displayAmount (never treat totalMinor integers as major currency units).',
+        'Do not invent numbers or alter facts.',
+      ].join(' '),
+      userPrompt: JSON.stringify({ ...facts, displayAmount }),
       schema: NarrativeSchema,
       config: options.llmConfig,
       fetchFn: options.llmFetchFn,
     });
-    if (llmRes.ok) {
+    if (llmRes.ok && !hasUnscaledMinorLeak(llmRes.data.summary, facts)) {
       narrative = llmRes.data.summary;
       narrativeSource = 'llm-narrated';
     }

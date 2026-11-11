@@ -14,6 +14,7 @@ import { createHttpMandateApiClient, createStubPayPalClient } from './tools.js';
 
 export interface StoryBeatResult {
   beat: 'injection_blocked' | 'clean_allowed';
+  agentMode: 'staged-compromised' | 'staged-scripted' | 'live-llm';
   run: ShoppingAgentRunResult;
   receipt?: IntentReceipt;
 }
@@ -81,6 +82,8 @@ export async function runThreeMinuteDemoStory(options?: {
       throw new Error('Missing staged demo fixtures for 3-minute story.');
     }
 
+    // Beat 1 deterministically replays a compromised agent ignoring the $40 cap
+    // after reading the hidden injection page, so the story always proves Mandate BLOCKs bad proposals.
     const injectedUrl = `${server.baseUrl}${injectedPage.path}`;
     const injectedRun = await runShoppingAgent({
       mandateId: DEFAULT_DEMO_MANDATE.mandateId,
@@ -90,8 +93,8 @@ export async function runThreeMinuteDemoStory(options?: {
       allowLocalDemo: true,
       paypalClient,
       apiClient,
-      llmConfig: useLive ? undefined : { provider: 'gemini', apiKey: 'staged-key', maxRetries: 0 },
-      llmFetchFn: useLive ? undefined : makeScriptedBeatFetch(injectedSpec, injectedUrl),
+      llmConfig: { provider: 'gemini', apiKey: 'staged-key', maxRetries: 0 },
+      llmFetchFn: makeScriptedBeatFetch(injectedSpec, injectedUrl),
     });
 
     const injectedReceipt =
@@ -131,8 +134,18 @@ export async function runThreeMinuteDemoStory(options?: {
       mode: useLive ? 'live-llm' : 'staged-scripted',
       apiMode: apiUrl ? 'http-mandate-api' : 'local-policy-mirror',
       beats: [
-        { beat: 'injection_blocked', run: injectedRun, receipt: injectedReceipt },
-        { beat: 'clean_allowed', run: cleanRun, receipt: cleanReceipt },
+        {
+          beat: 'injection_blocked',
+          agentMode: 'staged-compromised',
+          run: injectedRun,
+          receipt: injectedReceipt,
+        },
+        {
+          beat: 'clean_allowed',
+          agentMode: useLive ? 'live-llm' : 'staged-scripted',
+          run: cleanRun,
+          receipt: cleanReceipt,
+        },
       ],
     };
   } finally {
@@ -146,12 +159,20 @@ async function main(): Promise<void> {
   const apiUrl = process.env.MANDATE_API_URL?.trim();
 
   console.log('=== MANDATE: 3-Minute Demo Story ===');
-  console.log('[DISCLOSURE] Store pages, hidden injection, and verified-seller allowlist are staged for demo.\n');
+  console.log(
+    liveLlm
+      ? '[DISCLOSURE] Store pages & seller allowlist are staged; Beat 1 uses [STAGED COMPROMISED AGENT] to deterministically show BLOCK, while Beat 1 receipt + Beat 2 run live on Gemini.\n'
+      : '[DISCLOSURE] Store pages, hidden injection, Beat 1 compromised replay, and verified-seller allowlist are staged for demo.\n',
+  );
 
   const report = await runThreeMinuteDemoStory({ liveLlm, apiUrl, useLlmNarrative: liveLlm });
 
   for (const [idx, beat] of report.beats.entries()) {
-    console.log(`--- Beat ${idx + 1}/2: ${beat.beat} ---`);
+    const modeBadge =
+      beat.agentMode === 'staged-compromised'
+        ? '[STAGED COMPROMISED AGENT -> FIREWALL BLOCK]'
+        : `[${beat.agentMode}]`;
+    console.log(`--- Beat ${idx + 1}/2: ${beat.beat} ${modeBadge} ---`);
     for (const step of beat.run.trace) {
       console.log(`  Step ${step.step} [${step.action}]: ${step.summary}`);
     }

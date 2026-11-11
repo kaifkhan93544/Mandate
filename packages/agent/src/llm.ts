@@ -40,7 +40,7 @@ export interface GenerateStructuredOptions<T> {
 }
 
 const DEFAULT_MODELS: Record<LlmProviderName, string> = {
-  gemini: 'gemini-3.8-flash',
+  gemini: 'gemini-3.5-flash-lite',
   ollama: 'llama3.2:3b',
   mock: 'mock-deterministic',
 };
@@ -63,7 +63,7 @@ export function loadLlmConfigFromEnv(
     model: env.LLM_MODEL?.trim() || DEFAULT_MODELS[provider],
     apiKey: env.LLM_API_KEY?.trim() || env.GEMINI_API_KEY?.trim(),
     baseUrl: env.OLLAMA_BASE_URL?.trim() || 'http://localhost:11434',
-    timeoutMs: parsePositiveInt(env.LLM_TIMEOUT_MS, 15_000),
+    timeoutMs: parsePositiveInt(env.LLM_TIMEOUT_MS, 30_000),
     maxRetries: parsePositiveInt(env.LLM_MAX_RETRIES, 2),
     mockResponseJson: env.LLM_MOCK_JSON,
   };

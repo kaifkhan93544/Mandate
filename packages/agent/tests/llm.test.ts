@@ -17,7 +17,7 @@ describe('loadLlmConfigFromEnv', () => {
       LLM_TIMEOUT_MS: '8000',
     });
     expect(cfg.provider).toBe('gemini');
-    expect(cfg.model).toBe('gemini-3.8-flash');
+    expect(cfg.model).toBe('gemini-3.5-flash-lite');
     expect(cfg.apiKey).toBe('test-secret-key');
     expect(cfg.timeoutMs).toBe(8000);
   });
@@ -66,7 +66,7 @@ describe('generateStructured', () => {
       ok: true,
       data: { merchantId: 'giftshop', totalMinor: 2500, currency: 'USD' },
       provider: 'gemini',
-      model: 'gemini-3.8-flash',
+      model: 'gemini-3.5-flash-lite',
     });
   });
 

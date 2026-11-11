@@ -170,10 +170,11 @@ export async function runShoppingAgent(
       continue;
     }
 
+    const formattedAmount = `${(orderRes.proposal.totalMinor / 100).toFixed(2)} ${orderRes.proposal.currency}`;
     emit({
       step,
       action: 'propose_order',
-      summary: `Proposed ${orderRes.proposal.totalMinor} ${orderRes.proposal.currency} at ${orderRes.proposal.merchantId} -> ${orderRes.checkResult.decision.toUpperCase()}`,
+      summary: `Proposed ${formattedAmount} (${orderRes.proposal.totalMinor} minor) at ${orderRes.proposal.merchantId} -> ${orderRes.checkResult.decision.toUpperCase()}`,
       data: { proposal: orderRes.proposal, checkResult: orderRes.checkResult },
     });
 
