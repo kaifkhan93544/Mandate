@@ -1,0 +1,9 @@
+# AI Tools Log — `@mandate/agent` (Role H: Harshit)
+
+This log documents all AI tools used while building `@mandate/agent` (`H1`–`H4`, `S4`), example prompts, and what humans verified or rewrote.
+
+| Tool & Version / Model | Purpose | Example Prompt Used | Human / Automated Verification |
+| --- | --- | --- | --- |
+| **Antigravity (Gemini 3.8 Flash)** | Pair-programming `packages/agent` (`llm.ts`, `spike.ts`, `contracts.ts`, `tools.ts`, `agent.ts`, `demoPages.ts`, `attackSuite.ts`, `receipt.ts`, `demoHarness.ts`, and Vitest suites) | *"Build a provider-agnostic TypeScript LLM wrapper supporting Gemini REST (`x-goog-api-key` header) and Ollama `/api/chat`, with Zod validation, AbortController timeouts, bounded retries on 429, and unit tests."* | Verified all npm package versions and licenses (`zod@4.6.7`, `vitest@5.1.0`, `tsx@4.23.15`, `typescript@7.0.2`), checked Google Gemini REST docs, fixed `tools.test.ts` truncation length test, verified `tsc --noEmit` and `vitest run` (30/30 tests passing). |
+| **Google Gemini API (`gemini-3.8-flash`, AI Studio Free Tier)** | Runtime LLM for the shopping agent tool-calling loop (`H2`/`H3`) and optional intent-receipt narrative (`H4`) | *"You MUST reply with ONLY a JSON object matching `browse_page`, `propose_order`, or `abort`. Money `unitPriceMinor` MUST be integer cents."* | Every model output is parsed through Zod (`AgentActionSchema`, `SpikeProposalSchema`, `OrderProposalSchema`); receipt facts (`totalMinor`, `decision`, `mandateHash`) are generated strictly in code, never by the model. |
+| **Ollama (`llama3.2:3b`, MIT, optional local backup)** | Offline backup provider configured via `LLM_PROVIDER=ollama` | Same structured JSON system prompt via `http://localhost:11434/api/chat` (`format: "json"`). | Payload shape tested in `tests/llm.test.ts`. |
